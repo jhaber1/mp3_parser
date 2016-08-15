@@ -6,7 +6,7 @@ defmodule Unzipper do
   def start do
     :fs.start_link(:watcher, @folder)
     :fs.subscribe(:watcher)
-    watch   
+    watch
   end
 
   # handles only [created, modified, removed, renamed, undefined] (all the supported events of inotify-win)
@@ -18,13 +18,9 @@ defmodule Unzipper do
           mp3s = Path.wildcard("./tmp/*.mp3")
 
           # Load first mp3 to parse details
-          binary = File.read!(List.first(mp3s))
+          #binary = File.read!(List.first(mp3s))
 
-          # ID3v2 parsing
-          # First 23 bytes are irrelvant ID3v2 header stuff
-          << _ :: binary-size(23),
-            title :: binary-size(22), _ :: binary >> = binary
-          IO.puts(title)
+          # TODO
         else
           watch
         end
