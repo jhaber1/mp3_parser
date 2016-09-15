@@ -1,1 +1,1 @@
-%{"fs": {:git, "https://github.com/synrc/fs.git", "d3eaca4a2686caaad5dfd4dc36890d3b755185f7", []}}
+%{"fs": {:git, "https://github.com/synrc/fs.git", "d06fa279e0e9b0a1bf90a9cc838b754d72c08d56", []}}
