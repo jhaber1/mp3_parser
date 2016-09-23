@@ -15,7 +15,6 @@ defmodule Parser do
     tags = parse_tags(data, offset)
     id3 = Map.put(id3, :tags, tags)
 
-
     IO.puts(inspect(id3))
   end
 
@@ -101,7 +100,6 @@ defmodule Parser do
        string :: binary >> = binary_value
 
     # TODO: Not entirely happy with this, seems hacky -- revisit in future once more Elixir knowledge is accumulated
-    # 
     frame_value = Enum.reduce(String.codepoints(string), "", fn(codepoint, result) ->
       << parsed :: integer >> = codepoint
       if parsed == 0, do: result, else: result <> <<parsed>>
@@ -110,6 +108,6 @@ defmodule Parser do
 
   def parse_null_terminated_string([head | tail], result \\ "") do
     << parsed :: integer >> = head
-    if parsed == 0, do: result, else: parse_null_terminated_string(tail , result <> <<parsed>>)
+    if parsed == 0, do: result, else: parse_null_terminated_string(tail, result <> <<parsed>>)
   end
 end

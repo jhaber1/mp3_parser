@@ -4,9 +4,9 @@ defmodule Unzipper do
   @folder '/Users/jhaber/Music'
 
   def start do
-    :fs.start_link(:watcher, @folder)
-    :fs.subscribe(:watcher)
-    watch
+    # :fs.start_link(:watcher, @folder)
+    # :fs.subscribe(:watcher)
+    # watch
   end
 
   # handles only [created, modified, removed, renamed, undefined] (all the supported events of inotify-win)

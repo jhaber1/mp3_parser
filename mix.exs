@@ -1,8 +1,8 @@
-defmodule Unzipper.Mixfile do
+defmodule Mp3Parser.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :unzipper,
+    [app: :mp3_parser,
      version: "0.1.0",
      elixir: "~> 1.3",
      build_embedded: Mix.env == :prod,
@@ -14,7 +14,7 @@ defmodule Unzipper.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :fs]]
+    [applications: [:logger]]
   end
 
   # Dependencies can be Hex packages:
@@ -27,6 +27,5 @@ defmodule Unzipper.Mixfile do
   #
   # Type "mix help deps" for more examples and options
   defp deps do
-    [{ :fs, github: "synrc/fs" }]
   end
 end
