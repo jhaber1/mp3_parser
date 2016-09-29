@@ -2,7 +2,7 @@ require IEx;
 
 defmodule Parser do
   @path '/Users/jhaber/Downloads/Angel Sword - Rebels Beyond the Pale/Angel Sword - Rebels Beyond the Pale - 01 Devastator.mp3'
-  @picture_types []
+  @picture_types ["Other", "32x32 pixels 'file icon' (PNG only)", "Other file icon", "Cover (front)", "Cover (back)", "Leaflet page", "Media (e.g. label side of CD)", "Lead artist/lead performer/soloist", "Artist/performer", "Conductor", "Band/Orchestra", "Composer", "Lyricist/text writer", "Recording Location", "During recording", "During performance", "Movie/video screen capture", "A bright coloured fish", "Illustration", "Band/artist logotype", "Publisher/Studio logotype"]
 
   def parse(path \\ @path) do
     data = File.read!(path)
@@ -48,7 +48,9 @@ defmodule Parser do
      flags :: integer-unit(8)-size(2),
       _ :: binary >> = data
 
+    # Adjust offset to account for the frame header that was just parsed
     total_offset = offset + frame_header_size
+
     case String.first(frame_id) do
       # Text frames
       "T" ->
@@ -61,53 +63,66 @@ defmodule Parser do
         parse_tags(data, total_offset + size, tags ++ [tag_map])
       # Attached picture (APIC)
       "A" ->
-        s = size - total_offset - 1
+        #s = size - total_offset - 1
 
-        
-
-
-
-        # TODO: Need to learn how to terminate a string when there's a null byte
         << _ :: binary-size(total_offset),
           text_encoding :: integer-size(8),
-          mime_type :: binary-size(s),
+          mime_type :: binary-size(size),
           _ :: binary >> = data
-        IO.puts("MIME type: #{inspect(parse_null_terminated_string(String.codepoints(mime_type)))}")
+
+        mime_type = parse_null_terminated_string(mime_type)
+
+        # Adjust offset for text encoding byte, MIME type, and the null byte that was at the end of the MIME type
+        total_offset_with_mime = total_offset + 1 + String.length(mime_type) + 1
+
+        << _ :: binary-size(total_offset_with_mime),
+          picture_type :: integer,
+          description :: binary-size(64),
+          _ :: binary >> = data
+
+        # TODO: Handle null terminated string in parse_string !!!!!!!!!!!!!!!!!!!!!!!!!
+        # desc = parse_null_terminated_string(description)
+        # IO.puts(desc)
     end
-
-    
-
-    
   end
 
   def parse_frame(data, offset) do
-    << _ :: binary-size(offset),
-      frame_id :: binary-size(4),
-      size :: integer-unit(8)-size(4),
-      # TODO: Unparsed flags
-      _ :: integer-size(16),
-      binary_value :: binary-size(size),
-      _ :: binary >> = data
+    # << _ :: binary-size(offset),
+    #   frame_id :: binary-size(4),
+    #   size :: integer-unit(8)-size(4),
+    #   # TODO: Unparsed flags
+    #   _ :: integer-size(16),
+    #   binary_value :: binary-size(size),
+    #   _ :: binary >> = data
   end
 
   def parse_string(binary_value \\ <<1, 255, 254, 68, 0, 101, 0, 118, 0, 97, 0, 115, 0, 116, 0, 97, 0, 116, 0, 111, 0, 114, 0, 0, 0>>) do
-    # Take apart the string, figure out what text_encoding to use, figure out endianness
-    # TODO: text_encoding == 0: iso-8859-1,
-    # TODO: text_encoding == 2: utf-16be
-    # TODO: text_encoding == 3: utf-8
-    << text_encoding :: integer-size(8),
-       unicode_bom :: integer-unit(8)-size(2),
-       string :: binary >> = binary_value
 
-    # TODO: Not entirely happy with this, seems hacky -- revisit in future once more Elixir knowledge is accumulated
-    frame_value = Enum.reduce(String.codepoints(string), "", fn(codepoint, result) ->
-      << parsed :: integer >> = codepoint
-      if parsed == 0, do: result, else: result <> <<parsed>>
-    end)
+    # TODO: very hacky, need a better way to detect if the string has the encoding attached or not
+    # If the encoding is included with the string, make sure to match it properly
+    if String.starts_with?(binary_value, [<<0>>, <<1>>, <<2>>, <<3>>]) do
+      # Take apart the string, figure out what text_encoding to use, figure out endianness
+      # TODO: text_encoding == 0: iso-8859-1,
+      # TODO: text_encoding == 2: utf-16be
+      # TODO: text_encoding == 3: utf-8
+      << text_encoding :: integer-size(8),
+        unicode_bom :: integer-unit(8)-size(2),
+        string :: binary >> = binary_value
+    else
+      << unicode_bom :: integer-unit(8)-size(2),
+        string :: binary >> = binary_value
+    end
+
+    :unicode.characters_to_binary(string, {:utf16, :little}) |> String.trim_trailing(<<0>>)
   end
 
-  def parse_null_terminated_string([head | tail], result \\ "") do
-    << parsed :: integer >> = head
-    if parsed == 0, do: result, else: parse_null_terminated_string(tail, result <> <<parsed>>)
+  # TODO: Split this into another function signature?
+  def parse_null_terminated_string(<< codepoint :: utf8, rest :: binary>>, result \\ "") do
+    if codepoint == 0 do
+      result
+    else
+      parse_null_terminated_string(rest, << result :: binary, codepoint :: utf8 >>)
+    end
   end
+
 end
