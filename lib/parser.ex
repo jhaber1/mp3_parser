@@ -52,19 +52,8 @@ defmodule Parser do
     total_offset = offset + frame_header_size
 
     case String.first(frame_id) do
-      # Text frames
-      "T" ->
-        << _ :: binary-size(total_offset),
-          binary_value :: binary-size(size),
-          _ :: binary >> = data
-        tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value) }
-        IO.puts(inspect(tag_map))
-
-        parse_tags(data, total_offset + size, tags ++ [tag_map])
       # Attached picture (APIC)
       "A" ->
-        #s = size - total_offset - 1
-
         << _ :: binary-size(total_offset),
           text_encoding :: integer-size(8),
           mime_type :: binary-size(size),
@@ -81,7 +70,22 @@ defmodule Parser do
           _ :: binary >> = data
 
         desc = parse_null_terminated_string_utf16le(description)
-        IO.puts(desc)
+
+        tag_map = %{ id: frame_id, size: size, flags: flags, mime_type: mime_type,
+          picture_type: Enum.at(@picture_types, picture_type), description: desc }
+        IO.puts(inspect(tag_map))
+
+        parse_tags(data, total_offset + size, tags ++ [tag_map])
+      # Text frames
+      "T" ->
+        << _ :: binary-size(total_offset),
+          binary_value :: binary-size(size),
+          _ :: binary >> = data
+        tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value) }
+        IO.puts(inspect(tag_map))
+
+        parse_tags(data, total_offset + size, tags ++ [tag_map])
+      "U" -> true
     end
   end
 
