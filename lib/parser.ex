@@ -70,7 +70,7 @@ defmodule Parser do
           mime_type :: binary-size(size),
           _ :: binary >> = data
 
-        mime_type = parse_null_terminated_string(mime_type)
+        mime_type = parse_null_terminated_string_utf8(mime_type)
 
         # Adjust offset for text encoding byte, MIME type, and the null byte that was at the end of the MIME type
         total_offset_with_mime = total_offset + 1 + String.length(mime_type) + 1
@@ -80,9 +80,8 @@ defmodule Parser do
           description :: binary-size(64),
           _ :: binary >> = data
 
-        # TODO: Handle null terminated string in parse_string !!!!!!!!!!!!!!!!!!!!!!!!!
-        # desc = parse_null_terminated_string(description)
-        # IO.puts(desc)
+        desc = parse_null_terminated_string_utf16le(description)
+        IO.puts(desc)
     end
   end
 
@@ -116,12 +115,20 @@ defmodule Parser do
     :unicode.characters_to_binary(string, {:utf16, :little}) |> String.trim_trailing(<<0>>)
   end
 
-  # TODO: Split this into another function signature?
-  def parse_null_terminated_string(<< codepoint :: utf8, rest :: binary>>, result \\ "") do
+  # TODO: These need to all be combined passing in the encoding type so we know how to binary match them
+  def parse_null_terminated_string_utf8(<< codepoint :: utf8, rest :: binary>>, result \\ "") do
     if codepoint == 0 do
       result
     else
-      parse_null_terminated_string(rest, << result :: binary, codepoint :: utf8 >>)
+      parse_null_terminated_string_utf8(rest, << result :: binary, codepoint :: utf8 >>)
+    end
+  end
+
+  def parse_null_terminated_string_utf16le(<< codepoint :: utf16-little, rest :: binary>>, result \\ "") do
+    if codepoint == 0 do
+      result
+    else
+      parse_null_terminated_string_utf16le(rest, << result :: binary, codepoint :: utf8 >>)
     end
   end
 
