@@ -1,10 +1,9 @@
 require IEx;
 
 defmodule Parser do
-  @path '/Users/jhaber/Downloads/Angel Sword - Rebels Beyond the Pale/Angel Sword - Rebels Beyond the Pale - 01 Devastator.mp3'
   @picture_types ["Other", "32x32 pixels 'file icon' (PNG only)", "Other file icon", "Cover (front)", "Cover (back)", "Leaflet page", "Media (e.g. label side of CD)", "Lead artist/lead performer/soloist", "Artist/performer", "Conductor", "Band/Orchestra", "Composer", "Lyricist/text writer", "Recording Location", "During recording", "During performance", "Movie/video screen capture", "A bright coloured fish", "Illustration", "Band/artist logotype", "Publisher/Studio logotype"]
 
-  def parse(path \\ @path) do
+  def parse(path \\ '/Users/jhaber/Downloads/Angel Sword - Rebels Beyond the Pale/Angel Sword - Rebels Beyond the Pale - 01 Devastator.mp3') do
     data = File.read!(path)
 
     offset = 10
@@ -85,7 +84,37 @@ defmodule Parser do
         IO.puts(inspect(tag_map))
 
         parse_tags(data, total_offset + size, tags ++ [tag_map])
-      "U" -> true
+      # Unsychronised lyrics/text transcription
+      "U" ->
+        << _ :: binary-size(total_offset),
+          text_encoding :: integer,
+          language :: binary-size(3),
+          unicode_bom :: integer-unit(8)-size(2),
+          descriptor :: binary-size(size),
+          _ :: binary >> = data
+
+        descriptor = parse_null_terminated_string_utf16le(descriptor)
+
+        # Adjust offset for text encoding byte, language, Unicode BOM
+        total_offset_with_descriptor = total_offset + 1 + 3 + 2
+
+        # If there is a descriptor, add appropriate offset bytes
+        if String.length(descriptor) > 0 do
+          # Takes into account that the descriptor is utf16 with a null codepoint
+          total_offset_with_descriptor = total_offset_with_descriptor + ((2 * String.length(descriptor)) + 2)
+        end
+
+        lyrics_size = (total_offset + size) - total_offset_with_descriptor
+
+        << _ :: binary-size(total_offset_with_descriptor),
+          lyrics :: binary-size(lyrics_size),
+          _ :: binary >> = data
+
+        tag_map = %{ id: frame_id, size: size, flags: flags, language: language,
+          descriptor: descriptor, lyrics: parse_string(lyrics) }
+        IO.puts(inspect(tag_map))
+
+        parse_tags(data, total_offset + size, tags ++ [tag_map])
     end
   end
 
@@ -99,7 +128,7 @@ defmodule Parser do
     #   _ :: binary >> = data
   end
 
-  def parse_string(binary_value \\ <<1, 255, 254, 68, 0, 101, 0, 118, 0, 97, 0, 115, 0, 116, 0, 97, 0, 116, 0, 111, 0, 114, 0, 0, 0>>) do
+  def parse_string(binary_value) do
 
     # TODO: very hacky, need a better way to detect if the string has the encoding attached or not
     # If the encoding is included with the string, make sure to match it properly
