@@ -35,11 +35,6 @@ defmodule Parser do
     # TODO: make sure to set frame header size for 2.2 (2.4 is same as 2.3)
     frame_header_size = 10
 
-    # Assumes only T* frames for now
-    # TODO: Figure out parsing all others
-
-    # Code for picking parsing method HERE (use case/cond)
-
     << _ :: binary-size(offset),
      frame_id :: binary-size(4),
      size :: integer-unit(8)-size(4),
@@ -50,9 +45,9 @@ defmodule Parser do
     # Adjust offset to account for the frame header that was just parsed
     total_offset = offset + frame_header_size
 
-    case String.first(frame_id) do
+    cond do
       # Attached picture (APIC)
-      "A" ->
+      frame_id == "APIC" ->
         << _ :: binary-size(total_offset),
           text_encoding :: integer-size(8),
           mime_type :: binary-size(size),
@@ -75,61 +70,67 @@ defmodule Parser do
         IO.puts(inspect(tag_map))
 
         parse_tags(data, total_offset + size, tags ++ [tag_map])
-      # Text frames
-      "T" ->
-        << _ :: binary-size(total_offset),
-          binary_value :: binary-size(size),
-          _ :: binary >> = data
-        tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value) }
-        IO.puts(inspect(tag_map))
 
+      # Comments (COMM)
+      # Unsychronised lyrics/text transcription (USLT)
+      frame_id =~ ~R/^(COMM|USLT)/ ->
+        tag_map = parse_unsynched_lyrics_comments(data, frame_id, total_offset, size, flags)
         parse_tags(data, total_offset + size, tags ++ [tag_map])
-      # Unsychronised lyrics/text transcription
-      "U" ->
-        << _ :: binary-size(total_offset),
-          text_encoding :: integer,
-          language :: binary-size(3),
-          unicode_bom :: integer-unit(8)-size(2),
-          descriptor :: binary-size(size),
-          _ :: binary >> = data
 
-        descriptor = parse_null_terminated_string_utf16le(descriptor)
+      # Parsing for all other frames
+      true ->
+        case String.first(frame_id) do
+          # Text frames
+          "T" ->
+            << _ :: binary-size(total_offset),
+              binary_value :: binary-size(size),
+              _ :: binary >> = data
+            tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value) }
+            IO.puts(inspect(tag_map))
 
-        # Adjust offset for text encoding byte, language, Unicode BOM
-        total_offset_with_descriptor = total_offset + 1 + 3 + 2
-
-        # If there is a descriptor, add appropriate offset bytes
-        if String.length(descriptor) > 0 do
-          # Takes into account that the descriptor is utf16 with a null codepoint
-          total_offset_with_descriptor = total_offset_with_descriptor + ((2 * String.length(descriptor)) + 2)
+            parse_tags(data, total_offset + size, tags ++ [tag_map])
+          # URL frames
+          # "W" ->
+          _ -> nil
         end
-
-        lyrics_size = (total_offset + size) - total_offset_with_descriptor
-
-        << _ :: binary-size(total_offset_with_descriptor),
-          lyrics :: binary-size(lyrics_size),
-          _ :: binary >> = data
-
-        tag_map = %{ id: frame_id, size: size, flags: flags, language: language,
-          descriptor: descriptor, lyrics: parse_string(lyrics) }
-        IO.puts(inspect(tag_map))
-
-        parse_tags(data, total_offset + size, tags ++ [tag_map])
     end
   end
 
-  def parse_frame(data, offset) do
-    # << _ :: binary-size(offset),
-    #   frame_id :: binary-size(4),
-    #   size :: integer-unit(8)-size(4),
-    #   # TODO: Unparsed flags
-    #   _ :: integer-size(16),
-    #   binary_value :: binary-size(size),
-    #   _ :: binary >> = data
+  def parse_unsynched_lyrics_comments(data, frame_id, total_offset, size, flags) do
+    << _ :: binary-size(total_offset),
+      text_encoding :: integer,
+      language :: binary-size(3),
+      unicode_bom :: integer-unit(8)-size(2),
+      descriptor :: binary-size(size),
+      _ :: binary >> = data
+
+    descriptor = parse_null_terminated_string_utf16le(descriptor)
+
+    # Adjust offset for text encoding byte, language, Unicode BOM, and the descriptor's
+    # null codepoint
+    total_offset_with_descriptor = total_offset + 1 + 3 + 2 + 2
+
+    if String.length(descriptor) > 0 do
+      # Takes into account that the descriptor is utf16le
+      total_offset_with_descriptor = total_offset_with_descriptor + (2 * String.length(descriptor))
+    end
+
+    content_size = (total_offset + size) - total_offset_with_descriptor
+
+    << _ :: binary-size(total_offset_with_descriptor),
+      content :: binary-size(content_size),
+      _ :: binary >> = data
+
+    tag_map = %{ id: frame_id, size: size, flags: flags, language: language,
+      descriptor: descriptor }
+    tag_map = Map.put(tag_map, if(frame_id == "COMM", do: :comments, else: :lyrics), parse_string(content))
+
+    IO.puts(inspect(tag_map))
+
+    tag_map
   end
 
   def parse_string(binary_value) do
-
     # TODO: very hacky, need a better way to detect if the string has the encoding attached or not
     # If the encoding is included with the string, make sure to match it properly
     if String.starts_with?(binary_value, [<<0>>, <<1>>, <<2>>, <<3>>]) do
