@@ -7,10 +7,8 @@ defmodule Parser do
     data = File.read!(path)
 
     offset = 10
-    # offset = offset + 10
-    id3 = parse_header(data)
-    #IO.puts(inspect(id3))
 
+    id3 = parse_header(data)
     tags = parse_tags(data, offset)
     id3 = Map.put(id3, :tags, tags)
 
@@ -19,16 +17,31 @@ defmodule Parser do
 
   # Currently only assumes v2.3
   defp parse_header(data) do
-    << identifier :: binary-size(3),
-      # Version
+    # "ID3"
+    << _ :: binary-size(3),
+      # idv2 Version numbers
       minor_version :: integer,
       revision_number :: integer,
-      # TODO: Unparsed flags byte
-      _ :: integer,
+      # Flags
+      unsynchronisation :: integer-size(1),
+      extended_header :: integer-size(1),
+      experimental_indicator :: integer-size(1),
+      # Unused rest of the flags byte
+      _ :: integer-size(5),
+      # File size in bytes
       size :: integer-unit(8)-size(4),
       _ :: binary >> = data
 
-    %{ id: identifier, version: "v2.#{minor_version}.#{revision_number}", size: size }
+    %{
+      id: "ID3",
+      version: "v2.#{minor_version}.#{revision_number}",
+      size: size,
+      flags: [
+        unsynchronisation: is_present(unsynchronisation),
+        extended_header: is_present(extended_header),
+        experimental_indicator: is_present(experimental_indicator)
+      ]
+    }
   end
 
   def parse_tags(data, offset, tags \\ []) do
@@ -91,7 +104,7 @@ defmodule Parser do
             parse_tags(data, total_offset + size, tags ++ [tag_map])
           # URL frames
           # "W" ->
-          _ -> nil
+          _ -> tags
         end
     end
   end
@@ -106,12 +119,12 @@ defmodule Parser do
 
     descriptor = parse_null_terminated_string_utf16le(descriptor)
 
-    # Adjust offset for text encoding byte, language, Unicode BOM, and the descriptor's
-    # null codepoint
+    # Adjust offset for text encoding byte (1), language (3), Unicode BOM (2), and the descriptor's
+    # null codepoint (2)
     total_offset_with_descriptor = total_offset + 1 + 3 + 2 + 2
 
     if String.length(descriptor) > 0 do
-      # Takes into account that the descriptor is utf16le
+      # Takes into account that the descriptor is utf-16le
       total_offset_with_descriptor = total_offset_with_descriptor + (2 * String.length(descriptor))
     end
 
@@ -121,8 +134,7 @@ defmodule Parser do
       content :: binary-size(content_size),
       _ :: binary >> = data
 
-    tag_map = %{ id: frame_id, size: size, flags: flags, language: language,
-      descriptor: descriptor }
+    tag_map = %{ id: frame_id, size: size, flags: flags, language: language, descriptor: descriptor }
     tag_map = Map.put(tag_map, if(frame_id == "COMM", do: :comments, else: :lyrics), parse_string(content))
 
     IO.puts(inspect(tag_map))
@@ -166,4 +178,12 @@ defmodule Parser do
     end
   end
 
+  # TODO: Implement this as a Protocol for each of the types
+  def is_present(value) do
+    cond do
+      is_number(value) -> !value == 0
+      # is_bitstring(value) -> String.length(value) > 0
+      true -> is_nil(value)
+    end
+  end
 end
