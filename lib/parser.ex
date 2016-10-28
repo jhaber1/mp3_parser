@@ -66,7 +66,7 @@ defmodule Parser do
           mime_type :: binary-size(size),
           _ :: binary >> = data
 
-        mime_type = parse_null_terminated_string_utf8(mime_type)
+        mime_type = parse_null_terminated_string(3, mime_type)
 
         # Adjust offset for text encoding byte, MIME type, and the null byte that was at the end of the MIME type
         total_offset_with_mime = total_offset + 1 + String.length(mime_type) + 1
@@ -76,7 +76,7 @@ defmodule Parser do
           description :: binary-size(64),
           _ :: binary >> = data
 
-        desc = parse_null_terminated_string_utf16le(description)
+        desc = parse_null_terminated_string(text_encoding, description)
 
         tag_map = %{ id: frame_id, size: size, flags: flags, mime_type: mime_type,
           picture_type: Enum.at(@picture_types, picture_type), description: desc }
@@ -125,7 +125,7 @@ defmodule Parser do
         description :: binary-size(size),
         _ :: binary >> = data
 
-      desc = parse_null_terminated_string_utf16le(description)
+      desc = parse_null_terminated_string(text_encoding, description)
 
       # Account for for text encoding byte and null bytes that is at the end of description
       total_offset_with_desc = total_offset + 1 + 2
@@ -160,7 +160,7 @@ defmodule Parser do
       descriptor :: binary-size(size),
       _ :: binary >> = data
 
-    descriptor = parse_null_terminated_string_utf16le(descriptor)
+    descriptor = parse_null_terminated_string(text_encoding, descriptor)
 
     # Adjust offset for text encoding byte (1), language (3), Unicode BOM (2), and the descriptor's
     # null codepoint (2)
@@ -198,20 +198,21 @@ defmodule Parser do
     end |> String.trim_trailing(<<0>>)
   end
 
-  # TODO: These need to all be combined passing in the encoding type so we know how to binary match them
-  def parse_null_terminated_string_utf8(<< codepoint :: utf8, rest :: binary>>, result \\ "") do
+  # TODO: Make note in documentation that this follows the text encoding laid out in the mp3 docs
+  def parse_null_terminated_string(text_encoding, binary_value, result \\ "")
+  def parse_null_terminated_string(1, << codepoint :: utf16-little, rest :: binary>>, result) do
     if codepoint == 0 do
       result
     else
-      parse_null_terminated_string_utf8(rest, << result :: binary, codepoint :: utf8 >>)
+      parse_null_terminated_string(1, rest, << result :: binary, codepoint :: utf8 >>)
     end
   end
 
-  def parse_null_terminated_string_utf16le(<< codepoint :: utf16-little, rest :: binary>>, result \\ "") do
+  def parse_null_terminated_string(3, << codepoint :: utf8, rest :: binary>>, result) do
     if codepoint == 0 do
       result
     else
-      parse_null_terminated_string_utf16le(rest, << result :: binary, codepoint :: utf8 >>)
+      parse_null_terminated_string(3, rest, << result :: binary, codepoint :: utf8 >>)
     end
   end
 
