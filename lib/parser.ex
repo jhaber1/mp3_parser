@@ -127,29 +127,53 @@ defmodule Parser do
 
       desc = parse_null_terminated_string(text_encoding, description)
 
-      # Account for for text encoding byte and null bytes that is at the end of description
-      total_offset_with_desc = total_offset + 1 + 2
-      url_size = size - 1 - 2
+      # To continue parsing the frame, we need to orient ourselves and get the correct pointers depending on
+      # what text encoding the description uses
+      cond do
+        # iso-8859-1, utf8 (1 byte per codepoint)
+        text_encoding == 0 || text_encoding == 3 ->
+          # Account for text encoding byte and null terminating byte (1 if iso-8859-1, 2 if utf8)
+          if text_encoding == 0 do
+            total_offset_with_desc = total_offset + 1 + 1
+            url_size = size - 1 - 1
+          else
+            total_offset_with_desc = total_offset + 1 + 2
+            url_size = size - 1 - 2
+          end
 
-      # Takes into account that the description is utf-16le
-      if String.length(desc) > 0 do
-        total_offset_with_desc = total_offset_with_desc + (2 * String.length(desc))
-        url_size = url_size - (2 * String.length(desc))
+          # 1 byte per codepoint
+          if String.length(desc) > 0 do
+            bytes_offset = String.length(desc)
+            total_offset_with_desc = total_offset_with_desc + bytes_offset
+            url_size = url_size - bytes_offset
+          end
+
+        # utf-16be, utf-16le (2 bytes per codepoint)
+        text_encoding == 1 || text_encoding == 2 ->
+          # Account for for text encoding byte and null terminating bytes
+          total_offset_with_desc = total_offset + 1 + 2
+          url_size = size - 1 - 2
+
+          # 2 bytes per codepoint
+          if String.length(desc) > 0 do
+            bytes_offset = 2 * String.length(desc)
+            total_offset_with_desc = total_offset_with_desc + bytes_offset
+            url_size = url_size - bytes_offset
+          end
       end
 
       << _ :: binary-size(total_offset_with_desc),
         url :: binary-size(url_size),
         _ :: binary >> = data
+
+      %{ id: frame_id, size: size, flags: flags, url: url, description: desc }
     else
       << _ :: binary-size(total_offset),
         url :: binary-size(size),
         _ :: binary >> = data
+
+      %{ id: frame_id, size: size, flags: flags, url: url }
     end
-
-    tag_map = %{ id: frame_id, size: size, flags: flags, url: url }
-    if frame_id == "WXXX", do: tag_map = Map.put(tag_map, :description, desc)
-
-    tag_map
   end
 
   def parse_unsynched_lyrics_comments(data, frame_id, total_offset, size, flags) do
@@ -200,6 +224,7 @@ defmodule Parser do
 
   # TODO: Make note in documentation that this follows the text encoding laid out in the mp3 docs
   def parse_null_terminated_string(text_encoding, binary_value, result \\ "")
+  def parse_null_terminated_string(0, binary_value, result), do: parse_null_terminated_string(3, binary_value, result)
   def parse_null_terminated_string(1, << codepoint :: utf16-little, rest :: binary>>, result) do
     if codepoint == 0 do
       result
