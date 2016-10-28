@@ -95,18 +95,61 @@ defmodule Parser do
         case String.first(frame_id) do
           # Text frames
           "T" ->
+            binary_value_offset = size - 1
             << _ :: binary-size(total_offset),
-              binary_value :: binary-size(size),
+              text_encoding :: integer,
+              binary_value :: binary-size(binary_value_offset),
               _ :: binary >> = data
-            tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value) }
+
+            tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value, text_encoding) }
             IO.puts(inspect(tag_map))
 
             parse_tags(data, total_offset + size, tags ++ [tag_map])
           # URL frames
-          # "W" ->
+          "W" ->
+            tag_map = parse_url_frames(data, frame_id, total_offset, size, flags)
+            IO.puts(inspect(tag_map))
+
+            parse_tags(data, total_offset + size, tags ++ [tag_map])
+          # If there's no 4 byte frame id, then we've probably hit the actual song (meaning we're done)
           _ -> tags
         end
     end
+  end
+
+  def parse_url_frames(data, frame_id, total_offset, size, flags) do
+    # User-defined URL frames (WXXX) have the text encoding defined -- all others are ISO-8859-1
+    if frame_id == "WXXX" do
+      << _ :: binary-size(total_offset),
+        text_encoding :: integer,
+        description :: binary-size(size),
+        _ :: binary >> = data
+
+      desc = parse_null_terminated_string_utf16le(description)
+
+      # Account for for text encoding byte and null bytes that is at the end of description
+      total_offset_with_desc = total_offset + 1 + 2
+      url_size = size - 1 - 2
+
+      # Takes into account that the description is utf-16le
+      if String.length(desc) > 0 do
+        total_offset_with_desc = total_offset_with_desc + (2 * String.length(desc))
+        url_size = url_size - (2 * String.length(desc))
+      end
+
+      << _ :: binary-size(total_offset_with_desc),
+        url :: binary-size(url_size),
+        _ :: binary >> = data
+    else
+      << _ :: binary-size(total_offset),
+        url :: binary-size(size),
+        _ :: binary >> = data
+    end
+
+    tag_map = %{ id: frame_id, size: size, flags: flags, url: url }
+    if frame_id == "WXXX", do: tag_map = Map.put(tag_map, :description, desc)
+
+    tag_map
   end
 
   def parse_unsynched_lyrics_comments(data, frame_id, total_offset, size, flags) do
@@ -135,30 +178,24 @@ defmodule Parser do
       _ :: binary >> = data
 
     tag_map = %{ id: frame_id, size: size, flags: flags, language: language, descriptor: descriptor }
-    tag_map = Map.put(tag_map, if(frame_id == "COMM", do: :comments, else: :lyrics), parse_string(content))
+    tag_map = Map.put(tag_map, if(frame_id == "COMM", do: :comments, else: :lyrics), parse_string(content, text_encoding))
 
     IO.puts(inspect(tag_map))
 
     tag_map
   end
 
-  def parse_string(binary_value) do
-    # TODO: very hacky, need a better way to detect if the string has the encoding attached or not
-    # If the encoding is included with the string, make sure to match it properly
-    if String.starts_with?(binary_value, [<<0>>, <<1>>, <<2>>, <<3>>]) do
-      # Take apart the string, figure out what text_encoding to use, figure out endianness
-      # TODO: text_encoding == 0: iso-8859-1,
-      # TODO: text_encoding == 2: utf-16be
-      # TODO: text_encoding == 3: utf-8
-      << text_encoding :: integer-size(8),
-        unicode_bom :: integer-unit(8)-size(2),
-        string :: binary >> = binary_value
-    else
-      << unicode_bom :: integer-unit(8)-size(2),
-        string :: binary >> = binary_value
-    end
-
-    :unicode.characters_to_binary(string, {:utf16, :little}) |> String.trim_trailing(<<0>>)
+  def parse_string(binary_value, text_encoding) do
+    case text_encoding do
+      # iso-8859-1
+      0 -> binary_value
+      # utf-16le
+      1 -> :unicode.characters_to_binary(binary_value, {:utf16, :little})
+      # utf-16be
+      2 -> :unicode.characters_to_binary(binary_value, {:utf16, :big})
+      # utf-8
+      3 -> :unicode.characters_to_binary(binary_value, {:utf8})
+    end |> String.trim_trailing(<<0>>)
   end
 
   # TODO: These need to all be combined passing in the encoding type so we know how to binary match them
