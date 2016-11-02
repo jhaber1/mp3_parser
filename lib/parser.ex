@@ -58,6 +58,7 @@ defmodule Parser do
     # Adjust offset to account for the frame header that was just parsed
     total_offset = offset + frame_header_size
 
+    # Figure out the type of frame and how to parse it
     cond do
       # Attached picture (APIC)
       frame_id == "APIC" ->
@@ -90,30 +91,28 @@ defmodule Parser do
         tag_map = parse_unsynched_lyrics_comments(data, frame_id, total_offset, size, flags)
         parse_tags(data, total_offset + size, tags ++ [tag_map])
 
-      # Parsing for all other frames
-      true ->
-        case String.first(frame_id) do
-          # Text frames
-          "T" ->
-            binary_value_offset = size - 1
-            << _ :: binary-size(total_offset),
-              text_encoding :: integer,
-              binary_value :: binary-size(binary_value_offset),
-              _ :: binary >> = data
+      # Text frames
+      String.first(frame_id) == "T" ->
+        binary_value_offset = size - 1
+        << _ :: binary-size(total_offset),
+          text_encoding :: integer,
+          binary_value :: binary-size(binary_value_offset),
+          _ :: binary >> = data
 
-            tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value, text_encoding) }
-            IO.puts(inspect(tag_map))
+        tag_map = %{ id: frame_id, size: size, flags: flags, value: parse_string(binary_value, text_encoding) }
+        IO.puts(inspect(tag_map))
 
-            parse_tags(data, total_offset + size, tags ++ [tag_map])
-          # URL frames
-          "W" ->
-            tag_map = parse_url_frames(data, frame_id, total_offset, size, flags)
-            IO.puts(inspect(tag_map))
+        parse_tags(data, total_offset + size, tags ++ [tag_map])
 
-            parse_tags(data, total_offset + size, tags ++ [tag_map])
-          # If there's no 4 byte frame id, then we've probably hit the actual song (meaning we're done)
-          _ -> tags
-        end
+      # URL frames
+      String.first(frame_id) == "W" ->
+        tag_map = parse_url_frames(data, frame_id, total_offset, size, flags)
+        IO.puts(inspect(tag_map))
+
+        parse_tags(data, total_offset + size, tags ++ [tag_map])
+
+      # If there's no 4 byte frame id, then we've probably hit the actual song (meaning we're done)
+      true -> tags
     end
   end
 
